@@ -248,10 +248,7 @@ impl ManagedTorrent {
         f(&mut self.locked.write().state)
     }
 
-    pub fn with_chunk_tracker<R>(
-        &self,
-        f: impl FnOnce(&ChunkTracker) -> R,
-    ) -> anyhow::Result<R> {
+    pub fn with_chunk_tracker<R>(&self, f: impl FnOnce(&ChunkTracker) -> R) -> anyhow::Result<R> {
         let g = self.locked.read();
         match &g.state {
             ManagedTorrentState::Paused(p) => Ok(f(&p.chunk_tracker)),
