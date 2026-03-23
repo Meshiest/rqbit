@@ -213,7 +213,7 @@ pub struct TorrentStateLive {
         tokio::sync::mpsc::UnboundedSender<WriterRequest>,
         ChunkInfo,
     )>,
-    ratelimits: Limits,
+    pub ratelimits: Limits,
 }
 
 impl TorrentStateLive {
