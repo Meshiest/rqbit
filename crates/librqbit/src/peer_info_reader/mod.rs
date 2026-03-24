@@ -82,7 +82,8 @@ struct HandlerLocked {
 
 impl HandlerLocked {
     fn new(metadata_size: u32) -> anyhow::Result<Self> {
-        if metadata_size > 32 * 1024 * 1024 {
+        // BEP 9 recommends capping metadata size to prevent large allocations
+        if metadata_size > 16 * 1024 * 1024 {
             anyhow::bail!("metadata size {} is too big", metadata_size);
         }
         let buffer = vec![0u8; metadata_size as usize];

@@ -5,8 +5,6 @@
 mod double_buf;
 pub mod extended;
 
-use std::hint::unreachable_unchecked;
-
 use buffers::{ByteBuf, ByteBufOwned};
 use byteorder::{BE, ByteOrder};
 use bytes::Bytes;
@@ -277,7 +275,7 @@ impl Message<'_> {
                 let msg_id = match self {
                     Message::Request(..) => MSGID_REQUEST,
                     Message::Cancel(..) => MSGID_CANCEL,
-                    _ => unsafe { unreachable_unchecked() },
+                    _ => unreachable!(),
                 };
                 write_preamble!((INTEGER_LEN * 3) as u32, msg_id);
                 request.serialize_unchecked_len(&mut out[PREAMBLE_LEN..]);
@@ -298,7 +296,7 @@ impl Message<'_> {
                     Message::Unchoke => MSGID_UNCHOKE,
                     Message::Interested => MSGID_INTERESTED,
                     Message::NotInterested => MSGID_NOT_INTERESTED,
-                    _ => unsafe { unreachable_unchecked() },
+                    _ => unreachable!(),
                 };
                 write_preamble!(0, msg_id);
                 Ok(PREAMBLE_LEN)

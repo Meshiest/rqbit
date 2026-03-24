@@ -239,7 +239,7 @@ struct ConnectionIdMeta {
 #[derive(Default)]
 struct ClientLocked {
     connections: HashMap<SocketAddr, ConnectionIdMeta>,
-    transactions: HashMap<TransactionId, tokio::sync::oneshot::Sender<Response>>,
+    transactions: HashMap<TransactionId, (SocketAddr, tokio::sync::oneshot::Sender<Response>)>,
 }
 
 struct ClientShared {
@@ -317,12 +317,20 @@ impl UdpTrackerClient {
 
             let t = self.state.locked.write().transactions.remove(&tid);
             match t {
-                Some(tx) => match tx.send(response) {
-                    Ok(_) => {}
-                    Err(_) => {
-                        debug!(tid, "reader dead");
+                Some((expected_addr, tx)) => {
+                    // Validate that the response came from the tracker we sent the request to.
+                    // This prevents forged UDP packets from injecting fake responses.
+                    if addr.ip() != expected_addr.ip() {
+                        debug!(tid, ?addr, ?expected_addr, "UDP response from unexpected source, discarding");
+                        continue;
                     }
-                },
+                    match tx.send(response) {
+                        Ok(_) => {}
+                        Err(_) => {
+                            debug!(tid, "reader dead");
+                        }
+                    }
+                }
                 None => {
                     debug!(tid, "nowhere to send response");
                 }
@@ -355,7 +363,7 @@ impl UdpTrackerClient {
 
     async fn request(&self, addr: SocketAddr, request: Request) -> anyhow::Result<Response> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let tid_g = self.reserve_transaction_id(tx)?;
+        let tid_g = self.reserve_transaction_id(addr, tx)?;
 
         let mut write_buf = [0u8; 1024];
         let len = request.serialize(tid_g.tid, &mut write_buf)?;
@@ -383,6 +391,7 @@ impl UdpTrackerClient {
 
     fn reserve_transaction_id(
         &self,
+        target_addr: SocketAddr,
         tx: tokio::sync::oneshot::Sender<Response>,
     ) -> anyhow::Result<TransactionIdGuard<'_>> {
         let mut g = self.state.locked.write();
@@ -391,7 +400,7 @@ impl UdpTrackerClient {
             match g.transactions.entry(t) {
                 Entry::Occupied(_) => continue,
                 Entry::Vacant(vac) => {
-                    vac.insert(tx);
+                    vac.insert((target_addr, tx));
                     return Ok(TransactionIdGuard {
                         tid: t,
                         state: &self.state,

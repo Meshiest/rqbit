@@ -1962,7 +1962,7 @@ impl PeerHandler {
             .div_ceil(CHUNK_SIZE as u64)
             .try_into()?;
 
-        if piece_id as usize > total_pieces {
+        if piece_id as usize >= total_pieces {
             bail!("piece out of bounds")
         }
 
@@ -1983,8 +1983,12 @@ impl PeerHandler {
     }
 
     fn on_pex_message(&self, msg: UtPex<ByteBuf<'_>>) {
+        // BEP 11 recommends max 50 addresses per PEX message.
+        // Cap to prevent a malicious peer from flooding the queue.
+        const MAX_PEX_PEERS: usize = 50;
         msg.dropped_peers()
             .chain(msg.added_peers())
+            .take(MAX_PEX_PEERS)
             .for_each(|peer| {
                 self.state
                     .add_peer_if_not_seen(peer.addr)
