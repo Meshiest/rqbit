@@ -1,9 +1,12 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::net::SocketAddrV4;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Context;
 use anyhow::bail;
@@ -36,6 +39,7 @@ pub struct TrackerComms {
     announce_port: u16,
     reqwest_client: reqwest::Client,
     key: u32,
+    tracker_states: TrackerStatesMap,
 }
 
 #[derive(Default)]
@@ -69,6 +73,24 @@ impl TrackerCommsStats {
         self.downloaded_bytes >= self.total_bytes
     }
 }
+
+/// Per-tracker announce state, updated after each successful announce.
+#[derive(Debug, Clone)]
+pub struct TrackerAnnounceState {
+    /// When the last successful announce completed.
+    pub last_announce: Instant,
+    /// Interval from the tracker response.
+    pub interval: Duration,
+    /// When the next announce is expected.
+    pub next_announce: Instant,
+    /// Seeders reported by tracker.
+    pub seeds: u32,
+    /// Leechers reported by tracker.
+    pub leeches: u32,
+}
+
+/// Shared map of tracker URL → announce state, updated by tracker tasks.
+pub type TrackerStatesMap = Arc<RwLock<HashMap<String, TrackerAnnounceState>>>;
 
 pub trait TorrentStatsProvider: Send + Sync {
     fn get(&self) -> TrackerCommsStats;
@@ -149,7 +171,7 @@ impl TrackerComms {
         announce_port: u16,
         reqwest_client: reqwest::Client,
         udp_client: UdpTrackerClient,
-    ) -> Option<BoxStream<'static, SocketAddr>> {
+    ) -> Option<(BoxStream<'static, SocketAddr>, TrackerStatesMap)> {
         let trackers = trackers
             .into_iter()
             .filter_map(|t| match t.scheme() {
@@ -169,6 +191,8 @@ impl TrackerComms {
         tracing::trace!(?trackers);
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<SocketAddr>(16);
+        let tracker_states: TrackerStatesMap = Arc::new(RwLock::new(HashMap::new()));
+        let states_clone = Arc::clone(&tracker_states);
 
         let s = async_stream::stream! {
             use futures::StreamExt;
@@ -181,6 +205,7 @@ impl TrackerComms {
                 announce_port,
                 reqwest_client,
                 key: rand::random(),
+                tracker_states: states_clone,
             });
             let mut futures = FuturesUnordered::new();
             for tracker in trackers {
@@ -202,7 +227,7 @@ impl TrackerComms {
             }
         };
 
-        Some(s.boxed())
+        Some((s.boxed(), tracker_states))
     }
 
     fn add_tracker(
@@ -313,9 +338,21 @@ impl TrackerComms {
         for peer in response.iter_peers() {
             self.tx.send(peer).await?;
         }
-        Ok(Duration::from_secs(
-            response.min_interval.unwrap_or(response.interval),
-        ))
+        let interval = Duration::from_secs(response.min_interval.unwrap_or(response.interval));
+        let now = Instant::now();
+        if let Ok(mut states) = self.tracker_states.write() {
+            states.insert(
+                tracker_url.to_string(),
+                TrackerAnnounceState {
+                    last_announce: now,
+                    interval,
+                    next_announce: now + interval,
+                    seeds: response.complete as u32,
+                    leeches: response.incomplete as u32,
+                },
+            );
+        }
+        Ok(interval)
     }
 
     async fn task_single_tracker_monitor_udp(
@@ -358,18 +395,11 @@ impl TrackerComms {
 
             prev_addrs = Some(addrs);
 
-            match addrs {
+            let result = match addrs {
                 UdpTrackerResolveResult::One(addr) => {
-                    match self
-                        .tracker_one_request_udp(addr, &client)
+                    self.tracker_one_request_udp(addr, &client)
                         .instrument(trace_span!("udp request", ?addr))
                         .await
-                    {
-                        Ok(sleep) => sleep_interval = Some(sleep),
-                        Err(_) => {
-                            sleep_interval = Some(sleep_interval.unwrap_or(Duration::from_secs(60)))
-                        }
-                    }
                 }
                 UdpTrackerResolveResult::Two(v4, v6) => {
                     let (r4, r6) = tokio::join!(
@@ -378,12 +408,28 @@ impl TrackerComms {
                         self.tracker_one_request_udp(v6.into(), &client)
                             .instrument(trace_span!("udp request", addr=?v6))
                     );
-                    sleep_interval = Some(
-                        r4.or(r6)
-                            .ok()
-                            .or(sleep_interval)
-                            .unwrap_or(Duration::from_secs(60)),
-                    )
+                    r4.or(r6)
+                }
+            };
+            match result {
+                Ok((interval, seeds, leeches)) => {
+                    sleep_interval = Some(interval);
+                    let now = Instant::now();
+                    if let Ok(mut states) = self.tracker_states.write() {
+                        states.insert(
+                            url.to_string(),
+                            TrackerAnnounceState {
+                                last_announce: now,
+                                interval,
+                                next_announce: now + interval,
+                                seeds,
+                                leeches,
+                            },
+                        );
+                    }
+                }
+                Err(_) => {
+                    sleep_interval = Some(sleep_interval.unwrap_or(Duration::from_secs(60)));
                 }
             }
         }
@@ -393,7 +439,7 @@ impl TrackerComms {
         &self,
         addr: SocketAddr,
         client: &UdpTrackerClient,
-    ) -> anyhow::Result<Duration> {
+    ) -> anyhow::Result<(Duration, u32, u32)> {
         use tracker_comms_udp::*;
 
         let stats = self.stats.get();
@@ -422,12 +468,12 @@ impl TrackerComms {
         match client.announce(addr, request).await {
             Ok(response) => {
                 trace!(len = response.addrs.len(), "received announce response");
-                for addr in response.addrs {
-                    self.tx.send(addr).await.context("rx closed")?;
+                for addr in &response.addrs {
+                    self.tx.send(*addr).await.context("rx closed")?;
                 }
                 let sleep = response.interval.max(5);
-                let sleep = Duration::from_secs(sleep as u64);
-                Ok(sleep)
+                let interval = Duration::from_secs(sleep as u64);
+                Ok((interval, response.seeders, response.leechers))
             }
             Err(e) => {
                 debug!(?addr, "error reading announce response: {e:#}");
