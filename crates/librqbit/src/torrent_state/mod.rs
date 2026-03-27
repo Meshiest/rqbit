@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::Weak;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -201,11 +202,23 @@ pub struct ManagedTorrent {
     pub metadata: ArcSwapOption<TorrentMetadata>,
     pub(crate) state_change_notify: Notify,
     pub(crate) locked: RwLock<ManagedTorrentLocked>,
+    /// Per-tracker announce state, set when tracker comms start.
+    pub(crate) tracker_states: Mutex<Option<tracker_comms::TrackerStatesMap>>,
 }
 
 impl ManagedTorrent {
     pub fn id(&self) -> TorrentId {
         self.shared.id
+    }
+
+    /// Set the tracker announce states map (called when tracker comms start).
+    pub fn set_tracker_states(&self, states: tracker_comms::TrackerStatesMap) {
+        *self.tracker_states.lock().unwrap() = Some(states);
+    }
+
+    /// Get the current tracker announce states.
+    pub fn tracker_states(&self) -> Option<tracker_comms::TrackerStatesMap> {
+        self.tracker_states.lock().unwrap().clone()
     }
 
     pub fn name(&self) -> Option<String> {

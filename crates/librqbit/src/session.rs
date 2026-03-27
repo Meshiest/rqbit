@@ -5,7 +5,7 @@ use std::{
     net::SocketAddr,
     path::{Component, Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -70,7 +70,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 use tokio_util::sync::{CancellationToken, DropGuard};
 use tracing::{Instrument, debug, debug_span, error, info, trace, warn};
-use tracker_comms::{TrackerComms, UdpTrackerClient};
+use tracker_comms::{TrackerComms, TrackerStatesMap, UdpTrackerClient};
 
 pub const SUPPORTED_SCHEMES: [&str; 3] = ["http:", "https:", "magnet:"];
 
@@ -1159,18 +1159,23 @@ impl Session {
         };
 
         let mut seen_peers = Vec::new();
+        let mut tracker_states_for_handle = None;
 
         let (metadata, peer_rx) = {
             match metadata {
                 Some(metadata) => {
                     let mut peer_rx = None;
                     if !opts.paused && !opts.list_only {
-                        peer_rx = make_peer_rx();
+                        let (rx, states) = make_peer_rx();
+                        peer_rx = rx;
+                        tracker_states_for_handle = states;
                     }
                     (metadata, peer_rx)
                 }
                 None => {
-                    let peer_rx = make_peer_rx().context(
+                    let (rx, states) = make_peer_rx();
+                    tracker_states_for_handle = states;
+                    let peer_rx = rx.context(
                         "no known way to resolve peers (no DHT, no trackers, no initial_peers)",
                     )?;
                     let resolved_magnet = self
@@ -1298,9 +1303,13 @@ impl Session {
                 state_change_notify: Notify::new(),
                 shared: minfo,
                 metadata: ArcSwapOption::new(Some(metadata.clone())),
+                tracker_states: Mutex::new(None),
             });
 
             g.add_torrent(handle.clone(), id);
+            if let Some(states) = tracker_states_for_handle.take() {
+                handle.set_tracker_states(states);
+            }
             (handle, metadata)
         };
 
@@ -1431,14 +1440,18 @@ impl Session {
         announce: bool,
     ) -> Option<PeerStream> {
         let is_private = t.with_metadata(|m| m.info.info().private).unwrap_or(false);
-        self.make_peer_rx(
+        let (peer_rx, tracker_states) = self.make_peer_rx(
             t.info_hash(),
             t.shared().trackers.iter().cloned().collect(),
             announce,
             t.shared().options.force_tracker_interval,
             t.shared().options.initial_peers.clone(),
             is_private,
-        )
+        );
+        if let Some(states) = tracker_states {
+            t.set_tracker_states(states);
+        }
+        peer_rx
     }
 
     // Get a peer stream from both DHT and trackers.
@@ -1450,7 +1463,7 @@ impl Session {
         force_tracker_interval: Option<Duration>,
         initial_peers: Vec<SocketAddr>,
         is_private: bool,
-    ) -> Option<PeerStream> {
+    ) -> (Option<PeerStream>, Option<TrackerStatesMap>) {
         let dht_rx = if is_private {
             None
         } else {
@@ -1485,7 +1498,7 @@ impl Session {
             info_hash,
             session: self.clone(),
         };
-        let tracker_rx = TrackerComms::start(
+        let (tracker_stream, tracker_states) = TrackerComms::start(
             info_hash,
             self.peer_id,
             trackers.into_iter().collect(),
@@ -1494,20 +1507,23 @@ impl Session {
             self.announce_port().unwrap_or(4240),
             self.reqwest_client.clone(),
             self.udp_tracker_client.clone(),
-        );
+        )
+        .map(|(s, m)| (Some(s), Some(m)))
+        .unwrap_or((None, None));
 
         let initial_peers_rx = if initial_peers.is_empty() {
             None
         } else {
             Some(futures::stream::iter(initial_peers))
         };
-        merge_two_optional_streams(
+        let peer_rx = merge_two_optional_streams(
             merge_two_optional_streams(
-                merge_two_optional_streams(dht_rx, tracker_rx),
+                merge_two_optional_streams(dht_rx, tracker_stream),
                 initial_peers_rx,
             ),
             lsd_rx,
-        )
+        );
+        (peer_rx, tracker_states)
     }
 
     async fn try_update_persistence_metadata(&self, handle: &ManagedTorrentHandle) {
