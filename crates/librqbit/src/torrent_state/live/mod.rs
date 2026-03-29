@@ -1929,6 +1929,9 @@ impl PeerHandler {
                         ?addr,
                         "checksum for piece={} did not validate. disconnecting peer.", index
                     );
+                    // Track wasted bytes from failed hash check
+                    let piece_len = state.lengths.piece_length(chunk_info.piece_index) as u64;
+                    state.stats.wasted_bytes.fetch_add(piece_len, std::sync::atomic::Ordering::Relaxed);
                     state
                         .lock_write("mark_piece_broken")
                         .get_pieces_mut()?

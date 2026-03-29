@@ -8,4 +8,5 @@ pub struct AtomicStats {
     pub uploaded_bytes: AtomicU64,
     pub fetched_bytes: AtomicU64,
     pub total_piece_download_ms: AtomicU64,
+    pub wasted_bytes: AtomicU64,
 }
