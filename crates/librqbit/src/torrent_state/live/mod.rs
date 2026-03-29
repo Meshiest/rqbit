@@ -759,6 +759,47 @@ impl TorrentStateLive {
         }
     }
 
+    /// Count connected peers that have the full torrent (seeders).
+    pub fn count_seeders(&self) -> u32 {
+        let total_pieces = self.lengths.total_pieces() as usize;
+        self.peers
+            .states
+            .iter()
+            .filter(|entry| {
+                entry
+                    .value()
+                    .get_live()
+                    .map(|live| live.has_full_torrent(total_pieces))
+                    .unwrap_or(false)
+            })
+            .count() as u32
+    }
+
+    /// Read cumulative wasted bytes from failed hash checks.
+    pub fn wasted_bytes(&self) -> u64 {
+        self.stats
+            .wasted_bytes
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Compute per-piece availability from connected peer bitfields.
+    /// Returns a Vec<u8> of length total_pieces, where each element is
+    /// the number of peers that have that piece (saturating at 255).
+    pub fn piece_availability(&self) -> Vec<u8> {
+        let total_pieces = self.lengths.total_pieces() as usize;
+        let mut counts = vec![0u8; total_pieces];
+        for entry in self.peers.states.iter() {
+            if let Some(live) = entry.value().get_live() {
+                for i in 0..total_pieces {
+                    if live.bitfield.get(i).map(|p| *p).unwrap_or(false) {
+                        counts[i] = counts[i].saturating_add(1);
+                    }
+                }
+            }
+        }
+        counts
+    }
+
     pub async fn wait_until_completed(&self) {
         if self.is_finished() {
             return;
