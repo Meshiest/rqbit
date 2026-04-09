@@ -211,6 +211,11 @@ impl ManagedTorrent {
         self.shared.id
     }
 
+    /// The output folder where this torrent's files are stored.
+    pub fn output_folder(&self) -> &std::path::Path {
+        &self.shared.options.output_folder
+    }
+
     /// Set the tracker announce states map (called when tracker comms start).
     pub fn set_tracker_states(&self, states: tracker_comms::TrackerStatesMap) {
         *self.tracker_states.lock().unwrap() = Some(states);
