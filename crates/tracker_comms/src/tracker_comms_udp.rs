@@ -321,7 +321,12 @@ impl UdpTrackerClient {
                     // Validate that the response came from the tracker we sent the request to.
                     // This prevents forged UDP packets from injecting fake responses.
                     if addr.ip() != expected_addr.ip() {
-                        debug!(tid, ?addr, ?expected_addr, "UDP response from unexpected source, discarding");
+                        debug!(
+                            tid,
+                            ?addr,
+                            ?expected_addr,
+                            "UDP response from unexpected source, discarding"
+                        );
                         continue;
                     }
                     match tx.send(response) {
