@@ -115,6 +115,7 @@ pub(crate) struct ManagedTorrentOptions {
     pub peer_read_write_timeout: Option<Duration>,
     pub allow_overwrite: bool,
     pub output_folder: PathBuf,
+    pub skip_initial_check: bool,
     pub ratelimits: LimitsConfig,
     pub initial_peers: Vec<SocketAddr>,
     pub peer_limit: Option<usize>,

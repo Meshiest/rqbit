@@ -261,6 +261,10 @@ pub struct AddTorrentOptions {
     pub list_only: bool,
     /// The output folder for the torrent. If not set, the session's default one will be used.
     pub output_folder: Option<String>,
+    /// Skip the initial hash check. Use when files are known to be complete
+    /// (e.g. after moving already-verified files to a new location).
+    #[serde(default)]
+    pub skip_initial_check: bool,
     /// Sub-folder within session's default output folder. Will error if "output_folder" if also set.
     /// By default, multi-torrent files are downloaded to a sub-folder.
     pub sub_folder: Option<String>,
@@ -1274,6 +1278,7 @@ impl Session {
                     peer_connect_timeout: peer_opts.connect_timeout,
                     peer_read_write_timeout: peer_opts.read_write_timeout,
                     allow_overwrite: opts.overwrite,
+                    skip_initial_check: opts.skip_initial_check,
                     output_folder,
                     ratelimits: opts.ratelimits,
                     initial_peers: opts.initial_peers.clone().unwrap_or_default(),
