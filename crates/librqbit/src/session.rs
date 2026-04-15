@@ -147,7 +147,7 @@ pub struct Session {
 
     // Feature flags
     #[cfg(feature = "disable-upload")]
-    _disable_upload: bool,
+    _disable_upload: std::sync::atomic::AtomicBool,
     pub ipv4_only: bool,
     pub peer_limit: Option<usize>,
 }
@@ -744,7 +744,7 @@ impl Session {
                 peer_limit: opts.peer_limit,
 
                 #[cfg(feature = "disable-upload")]
-                _disable_upload: opts.disable_upload,
+                _disable_upload: std::sync::atomic::AtomicBool::new(opts.disable_upload),
                 blocklist,
                 allowlist,
                 lsd,
@@ -1002,6 +1002,26 @@ impl Session {
         callback: impl Fn(&mut dyn Iterator<Item = (TorrentId, &ManagedTorrentHandle)>) -> R,
     ) -> R {
         callback(&mut self.db.read().torrents.iter().map(|(id, t)| (*id, t)))
+    }
+
+    /// Toggle the session-wide "disable upload" flag at runtime and propagate
+    /// it to every currently managed torrent. When enabled, peers that request
+    /// pieces are disconnected and we skip announcing our bitfield once a
+    /// torrent is finished.
+    #[cfg(feature = "disable-upload")]
+    pub fn set_disable_upload(&self, v: bool) {
+        self._disable_upload
+            .store(v, std::sync::atomic::Ordering::Relaxed);
+        let db = self.db.read();
+        for (_id, t) in db.torrents.iter() {
+            t.shared.options.set_disable_upload(v);
+        }
+    }
+
+    #[cfg(feature = "disable-upload")]
+    pub fn disable_upload(&self) -> bool {
+        self._disable_upload
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Add a torrent to the session.
@@ -1284,7 +1304,10 @@ impl Session {
                     initial_peers: opts.initial_peers.clone().unwrap_or_default(),
                     peer_limit: opts.peer_limit.or(self.peer_limit),
                     #[cfg(feature = "disable-upload")]
-                    _disable_upload: self._disable_upload,
+                    _disable_upload: std::sync::atomic::AtomicBool::new(
+                        self._disable_upload
+                            .load(std::sync::atomic::Ordering::Relaxed),
+                    ),
                 },
                 connector: self.connector.clone(),
                 session: Arc::downgrade(self),

@@ -120,19 +120,29 @@ pub(crate) struct ManagedTorrentOptions {
     pub initial_peers: Vec<SocketAddr>,
     pub peer_limit: Option<usize>,
     #[cfg(feature = "disable-upload")]
-    pub _disable_upload: bool,
+    pub _disable_upload: std::sync::atomic::AtomicBool,
 }
 
 impl ManagedTorrentOptions {
     #[cfg(feature = "disable-upload")]
     pub fn disable_upload(&self) -> bool {
         self._disable_upload
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[cfg(feature = "disable-upload")]
+    pub fn set_disable_upload(&self, v: bool) {
+        self._disable_upload
+            .store(v, std::sync::atomic::Ordering::Relaxed);
     }
 
     #[cfg(not(feature = "disable-upload"))]
     pub const fn disable_upload(&self) -> bool {
         false
     }
+
+    #[cfg(not(feature = "disable-upload"))]
+    pub fn set_disable_upload(&self, _v: bool) {}
 }
 
 // Torrent bencodee "info" + some precomputed fields based on it for frequent access.
