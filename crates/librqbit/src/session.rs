@@ -38,7 +38,7 @@ use crate::{
         ManagedTorrentHandle, ManagedTorrentLocked, ManagedTorrentOptions, ManagedTorrentState,
         TorrentMetadata, TorrentStateLive, initializing::TorrentStateInitializing,
     },
-    type_aliases::{BoxAsyncReadVectored, BoxAsyncWrite, PeerStream},
+    type_aliases::{BoxAsyncReadVectored, BoxAsyncWrite, FilePriority, PeerStream},
 };
 use anyhow::{Context, bail};
 use arc_swap::ArcSwapOption;
@@ -1581,6 +1581,16 @@ impl Session {
         only_files: &HashSet<usize>,
     ) -> anyhow::Result<()> {
         handle.update_only_files(only_files)?;
+        self.try_update_persistence_metadata(handle).await;
+        Ok(())
+    }
+
+    pub async fn update_file_priorities(
+        self: &Arc<Self>,
+        handle: &ManagedTorrentHandle,
+        priorities: &std::collections::HashMap<usize, FilePriority>,
+    ) -> anyhow::Result<()> {
+        handle.update_file_priorities(priorities)?;
         self.try_update_persistence_metadata(handle).await;
         Ok(())
     }

@@ -48,6 +48,7 @@ use crate::storage::BoxStorageFactory;
 use crate::stream_connect::StreamConnector;
 use crate::torrent_state::stats::LiveStats;
 use crate::type_aliases::FileInfos;
+use crate::type_aliases::FilePriority;
 use crate::type_aliases::PeerStream;
 
 use initializing::TorrentStateInitializing;
@@ -635,6 +636,57 @@ impl ManagedTorrent {
         };
 
         g.only_files = Some(only_files.iter().copied().collect());
+        Ok(())
+    }
+
+    pub(crate) fn update_file_priorities(
+        &self,
+        priorities: &std::collections::HashMap<usize, FilePriority>,
+    ) -> anyhow::Result<()> {
+        let metadata = self.metadata.load();
+        let metadata = metadata.as_ref().context("torrent is not resolved")?;
+        let file_count = metadata.file_infos.len();
+        for &idx in priorities.keys() {
+            if idx >= file_count {
+                anyhow::bail!("file index {idx} out of range");
+            }
+        }
+
+        {
+            let mut g = self.locked.write();
+            match &mut g.state {
+                ManagedTorrentState::Live(live) => {
+                    let live = live.clone();
+                    drop(g);
+                    live.update_file_priorities(priorities)?;
+                }
+                ManagedTorrentState::Paused(paused) => {
+                    let only_files: HashSet<usize> = (0..file_count)
+                        .filter(|i| {
+                            priorities
+                                .get(i)
+                                .copied()
+                                .unwrap_or(FilePriority::Normal)
+                                != FilePriority::DoNotDownload
+                        })
+                        .collect();
+                    paused.update_only_files(&only_files)?;
+                }
+                _ => {}
+            }
+        }
+        // Update stored only_files to reflect the new DoNotDownload set
+        let only_files: Vec<usize> = (0..file_count)
+            .filter(|i| {
+                priorities
+                    .get(i)
+                    .copied()
+                    .unwrap_or(FilePriority::Normal)
+                    != FilePriority::DoNotDownload
+            })
+            .collect();
+        let mut g = self.locked.write();
+        g.only_files = Some(only_files);
         Ok(())
     }
 }

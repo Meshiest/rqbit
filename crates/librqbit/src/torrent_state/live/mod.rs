@@ -863,6 +863,72 @@ impl TorrentStateLive {
         Ok(())
     }
 
+    pub(crate) fn update_file_priorities(
+        &self,
+        priorities: &std::collections::HashMap<usize, FilePriority>,
+    ) -> anyhow::Result<()> {
+        let file_count = self.metadata.file_infos.len();
+        for &idx in priorities.keys() {
+            anyhow::ensure!(idx < file_count, "file index {idx} out of range");
+        }
+
+        // Derive only_files from priorities: exclude DoNotDownload
+        let only_files: HashSet<usize> = (0..file_count)
+            .filter(|i| {
+                priorities
+                    .get(i)
+                    .copied()
+                    .unwrap_or(FilePriority::Normal)
+                    != FilePriority::DoNotDownload
+            })
+            .collect();
+
+        let mut g = self.lock_write("update_file_priorities");
+
+        // Update chunk tracker's selected pieces
+        let pt = g.get_pieces_mut()?;
+        let hns = pt.update_only_files(&self.metadata.file_infos, &only_files)?;
+
+        // Rebuild the file_priorities ordering vector
+        let mut new_priorities: FilePriorities = (0..file_count)
+            .filter(|i| {
+                priorities
+                    .get(i)
+                    .copied()
+                    .unwrap_or(FilePriority::Normal)
+                    != FilePriority::DoNotDownload
+            })
+            .map(|i| {
+                (
+                    i,
+                    priorities.get(&i).copied().unwrap_or(FilePriority::Normal),
+                )
+            })
+            .collect();
+        new_priorities.sort_unstable_by(|(a_id, a_pri), (b_id, b_pri)| {
+            a_pri.sort_key().cmp(&b_pri.sort_key()).then_with(|| {
+                let a_name = self
+                    .metadata
+                    .file_infos
+                    .get(*a_id)
+                    .map(|fi| fi.relative_filename.as_path());
+                let b_name = self
+                    .metadata
+                    .file_infos
+                    .get(*b_id)
+                    .map(|fi| fi.relative_filename.as_path());
+                a_name.cmp(&b_name)
+            })
+        });
+        g.file_priorities = new_priorities;
+
+        if !hns.finished() {
+            drop(g);
+            self.reconnect_all_not_needed_peers();
+        }
+        Ok(())
+    }
+
     // If we have all selected pieces but not necessarily all pieces.
     pub(crate) fn is_finished(&self) -> bool {
         self.get_hns().map(|h| h.finished()).unwrap_or_default()
