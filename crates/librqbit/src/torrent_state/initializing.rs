@@ -194,7 +194,9 @@ impl TorrentStateInitializing {
                 bytes[byte_count - 1] &= !((1u8 << trailing) - 1);
             }
             let bf = BF::from_boxed_slice(bytes.into_boxed_slice());
-            bitv_factory.store_initial_check(id, bf).await
+            bitv_factory
+                .store_initial_check(id, bf)
+                .await
                 .context("error storing initial check bitfield")?
         } else {
             match have_pieces {
@@ -205,8 +207,12 @@ impl TorrentStateInitializing {
                         .shared
                         .spawner
                         .block_in_place_with_semaphore(|| {
-                            FileOps::new(&self.metadata.info, &self.files, &self.metadata.file_infos)
-                                .initial_check(&self.checked_bytes)
+                            FileOps::new(
+                                &self.metadata.info,
+                                &self.files,
+                                &self.metadata.file_infos,
+                            )
+                            .initial_check(&self.checked_bytes)
                         })
                         .await?;
                     bitv_factory

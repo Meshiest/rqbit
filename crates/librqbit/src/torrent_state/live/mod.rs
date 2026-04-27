@@ -96,7 +96,7 @@ use crate::{
     session_stats::SessionStats,
     stream_connect::ConnectionKind,
     torrent_state::{peer::Peer, utils::atomic_inc},
-    type_aliases::{BF, FilePriorities, FileStorage, PeerHandle},
+    type_aliases::{BF, FilePriorities, FilePriority, FileStorage, PeerHandle},
 };
 
 use self::{
@@ -237,14 +237,23 @@ impl TorrentStateLive {
 
         // TODO: make it configurable
         let file_priorities = {
-            let mut pri = (0..paused.metadata.file_infos.len()).collect::<Vec<usize>>();
-            // sort by filename, cause many torrents have random sort order.
-            pri.sort_unstable_by_key(|id| {
-                paused
-                    .metadata
-                    .file_infos
-                    .get(*id)
-                    .map(|fi| fi.relative_filename.as_path())
+            let mut pri: Vec<(usize, FilePriority)> = (0..paused.metadata.file_infos.len())
+                .map(|id| (id, FilePriority::Normal))
+                .collect();
+            pri.sort_unstable_by(|(a_id, a_pri), (b_id, b_pri)| {
+                a_pri.sort_key().cmp(&b_pri.sort_key()).then_with(|| {
+                    let a_name = paused
+                        .metadata
+                        .file_infos
+                        .get(*a_id)
+                        .map(|fi| fi.relative_filename.as_path());
+                    let b_name = paused
+                        .metadata
+                        .file_infos
+                        .get(*b_id)
+                        .map(|fi| fi.relative_filename.as_path());
+                    a_name.cmp(&b_name)
+                })
             });
             pri
         };

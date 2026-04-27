@@ -14,7 +14,30 @@ pub type PeerHandle = SocketAddr;
 pub type PeerStream = BoxStream<'static, SocketAddr>;
 pub type FileInfos = Vec<FileInfo>;
 pub(crate) type FileStorage = Box<dyn TorrentStorage>;
-pub(crate) type FilePriorities = Vec<usize>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum FilePriority {
+    DoNotDownload,
+    Low,
+    #[default]
+    Normal,
+    High,
+    Highest,
+}
+
+impl FilePriority {
+    pub fn sort_key(&self) -> u8 {
+        match self {
+            Self::Highest => 0,
+            Self::High => 1,
+            Self::Normal => 2,
+            Self::Low => 3,
+            Self::DoNotDownload => 4,
+        }
+    }
+}
+
+pub type FilePriorities = Vec<(usize, FilePriority)>;
 
 pub(crate) type BoxAsyncReadVectored = Box<dyn AsyncReadVectored + Unpin + Send + 'static>;
 pub(crate) type BoxAsyncWrite = Box<dyn AsyncWrite + Unpin + Send + 'static>;

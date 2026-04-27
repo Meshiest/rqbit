@@ -75,7 +75,7 @@ mod stream_connect;
 mod torrent_state;
 #[cfg(feature = "tracing-subscriber-utils")]
 pub mod tracing_subscriber_config_utils;
-mod type_aliases;
+pub mod type_aliases;
 #[cfg(all(feature = "http-api", feature = "upnp-serve-adapter"))]
 pub mod upnp_server_adapter;
 mod vectored_traits;
@@ -101,7 +101,7 @@ pub use torrent_state::{
     TorrentStatsState,
 };
 pub use tracker_comms::{TrackerAnnounceState, TrackerStatesMap};
-pub use type_aliases::FileInfos;
+pub use type_aliases::{FileInfos, FilePriorities, FilePriority};
 
 pub use buffers::*;
 pub use clone_to_owned::CloneToOwned;

@@ -318,7 +318,10 @@ impl PieceTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{bitv::BitV as BitVTrait, type_aliases::BF};
+    use crate::{
+        bitv::BitV as BitVTrait,
+        type_aliases::{BF, FilePriority},
+    };
     use librqbit_core::lengths::Lengths;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
@@ -370,7 +373,9 @@ mod tests {
     }
 
     fn make_default_file_priorities(file_infos: &FileInfos) -> FilePriorities {
-        (0..file_infos.len()).collect()
+        (0..file_infos.len())
+            .map(|i| (i, FilePriority::Normal))
+            .collect()
     }
 
     #[test]

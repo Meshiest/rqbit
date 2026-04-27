@@ -9,7 +9,7 @@ use tracing::{debug, trace};
 use crate::{
     bitv::{BitV, BoxBitV},
     file_info::FileInfo,
-    type_aliases::{BF, BS, FileInfos, FilePriorities},
+    type_aliases::{BF, BS, FileInfos, FilePriorities, FilePriority},
 };
 
 pub struct ChunkTracker {
@@ -240,7 +240,8 @@ impl ChunkTracker {
     ) -> impl Iterator<Item = ValidPieceIndex> + 'a {
         file_priorities
             .iter()
-            .filter_map(|p| Some((*p, file_infos.get(*p)?)))
+            .filter(|(_, pri)| *pri != FilePriority::DoNotDownload)
+            .filter_map(|(p, _)| Some((*p, file_infos.get(*p)?)))
             .filter(|(id, f)| self.per_file_bytes[*id] != f.len)
             .flat_map(|(_id, f)| f.iter_piece_priorities())
             .filter(|id| self.queue_pieces[*id])
