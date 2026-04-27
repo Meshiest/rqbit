@@ -410,7 +410,8 @@ mod tests {
     use std::collections::HashSet;
 
     use crate::{
-        bitv::BitV, chunk_tracker::HaveNeededSelected, file_info::FileInfo, type_aliases::BF,
+        bitv::BitV, chunk_tracker::HaveNeededSelected, file_info::FileInfo,
+        type_aliases::{BF, FilePriority},
     };
 
     use super::{ChunkTracker, compute_chunk_have_status};
@@ -666,5 +667,50 @@ mod tests {
         assert!(ct.queue_pieces[0]);
         assert!(ct.queue_pieces[1]);
         assert!(ct.queue_pieces[2]);
+    }
+
+    #[test]
+    fn test_iter_queued_pieces_respects_priority_order() {
+        let piece_len = CHUNK_SIZE;
+        // 4 pieces, 4 files — each file owns one piece
+        let total_len = piece_len as u64 * 4;
+        let l = Lengths::new(total_len, piece_len).unwrap();
+        assert_eq!(l.total_pieces(), 4);
+
+        let file_infos: Vec<FileInfo> = (0..4)
+            .map(|i| FileInfo {
+                relative_filename: format!("file_{i}").into(),
+                offset_in_torrent: piece_len as u64 * i as u64,
+                piece_range: i as u32..(i as u32 + 1),
+                len: piece_len as u64,
+                attrs: Default::default(),
+            })
+            .collect();
+
+        let bf_len = l.piece_bitfield_bytes();
+        let have = BF::from_boxed_slice(vec![0u8; bf_len].into_boxed_slice());
+        let mut selected = BF::from_boxed_slice(vec![0u8; bf_len].into_boxed_slice());
+        for i in 0..4 {
+            selected.set(i, true);
+        }
+
+        let ct = ChunkTracker::new(have.into_dyn(), selected, l, &file_infos).unwrap();
+
+        // file 0=Low, file 1=Highest, file 2=Normal, file 3=DoNotDownload
+        let file_priorities = vec![
+            (1, FilePriority::Highest),
+            (2, FilePriority::Normal),
+            (0, FilePriority::Low),
+            (3, FilePriority::DoNotDownload),
+        ];
+
+        let pieces: Vec<u32> = ct
+            .iter_queued_pieces(&file_priorities, &file_infos)
+            .map(|p| p.get())
+            .collect();
+
+        // Should yield piece 1 (Highest), then 2 (Normal), then 0 (Low).
+        // Piece 3 (DoNotDownload) should be excluded.
+        assert_eq!(pieces, vec![1, 2, 0]);
     }
 }
