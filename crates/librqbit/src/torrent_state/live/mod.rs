@@ -875,10 +875,7 @@ impl TorrentStateLive {
         // Derive only_files from priorities: exclude DoNotDownload
         let only_files: HashSet<usize> = (0..file_count)
             .filter(|i| {
-                priorities
-                    .get(i)
-                    .copied()
-                    .unwrap_or(FilePriority::Normal)
+                priorities.get(i).copied().unwrap_or(FilePriority::Normal)
                     != FilePriority::DoNotDownload
             })
             .collect();
@@ -892,10 +889,7 @@ impl TorrentStateLive {
         // Rebuild the file_priorities ordering vector
         let mut new_priorities: FilePriorities = (0..file_count)
             .filter(|i| {
-                priorities
-                    .get(i)
-                    .copied()
-                    .unwrap_or(FilePriority::Normal)
+                priorities.get(i).copied().unwrap_or(FilePriority::Normal)
                     != FilePriority::DoNotDownload
             })
             .map(|i| {

@@ -663,10 +663,7 @@ impl ManagedTorrent {
                 ManagedTorrentState::Paused(paused) => {
                     let only_files: HashSet<usize> = (0..file_count)
                         .filter(|i| {
-                            priorities
-                                .get(i)
-                                .copied()
-                                .unwrap_or(FilePriority::Normal)
+                            priorities.get(i).copied().unwrap_or(FilePriority::Normal)
                                 != FilePriority::DoNotDownload
                         })
                         .collect();
@@ -678,10 +675,7 @@ impl ManagedTorrent {
         // Update stored only_files to reflect the new DoNotDownload set
         let only_files: Vec<usize> = (0..file_count)
             .filter(|i| {
-                priorities
-                    .get(i)
-                    .copied()
-                    .unwrap_or(FilePriority::Normal)
+                priorities.get(i).copied().unwrap_or(FilePriority::Normal)
                     != FilePriority::DoNotDownload
             })
             .collect();

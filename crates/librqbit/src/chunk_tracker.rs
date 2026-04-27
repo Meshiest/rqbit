@@ -410,7 +410,9 @@ mod tests {
     use std::collections::HashSet;
 
     use crate::{
-        bitv::BitV, chunk_tracker::HaveNeededSelected, file_info::FileInfo,
+        bitv::BitV,
+        chunk_tracker::HaveNeededSelected,
+        file_info::FileInfo,
         type_aliases::{BF, FilePriority},
     };
 
