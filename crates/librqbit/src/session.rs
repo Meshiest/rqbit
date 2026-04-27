@@ -268,6 +268,10 @@ pub struct AddTorrentOptions {
     /// Sub-folder within session's default output folder. Will error if "output_folder" if also set.
     /// By default, multi-torrent files are downloaded to a sub-folder.
     pub sub_folder: Option<String>,
+    /// When true and `output_folder` is set, don't auto-append the torrent's
+    /// default subfolder (the torrent name for multi-file torrents).
+    #[serde(default)]
+    pub no_auto_subfolder: bool,
     /// Peer connection options, timeouts etc. If not set, session's defaults will be used.
     pub peer_opts: Option<PeerConnectionOptions>,
 
@@ -1235,7 +1239,17 @@ impl Session {
                 self.get_default_subfolder_for_torrent(&metadata.info, name.as_deref())?
                     .unwrap_or_default(),
             ),
-            (Some(o), None) => PathBuf::from(o),
+            (Some(o), None) => {
+                let base = PathBuf::from(o);
+                if opts.no_auto_subfolder {
+                    base
+                } else {
+                    base.join(
+                        self.get_default_subfolder_for_torrent(&metadata.info, name.as_deref())?
+                            .unwrap_or_default(),
+                    )
+                }
+            }
             (Some(_), Some(_)) => {
                 bail!("you can't provide both output_folder and sub_folder")
             }
