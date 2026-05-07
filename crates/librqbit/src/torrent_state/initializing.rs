@@ -183,21 +183,34 @@ impl TorrentStateInitializing {
         let have_pieces = self.validate_fastresume(&*bitv_factory, have_pieces).await;
 
         let have_pieces = if self.shared.options.skip_initial_check {
-            // Skip hash check — assume all pieces are valid (used after moving files)
-            info!("Skipping initial check (skip_initial_check=true)");
-            let total_pieces = self.metadata.info.lengths().total_pieces() as usize;
-            let byte_count = (total_pieces + 7) / 8;
-            let mut bytes = vec![0xFFu8; byte_count];
-            // Clear trailing bits beyond total_pieces
-            let trailing = byte_count * 8 - total_pieces;
-            if trailing > 0 {
-                bytes[byte_count - 1] &= !((1u8 << trailing) - 1);
+            // Skip hash check — try to restore persisted bitfield first so partial
+            // downloads keep their real progress instead of being marked 100%.
+            match have_pieces {
+                Some(persisted) => {
+                    info!("Skipping initial check: restored persisted bitfield");
+                    persisted
+                }
+                None => {
+                    // No persisted bitfield — assume all pieces are valid
+                    // (used after moving already-verified complete files)
+                    info!(
+                        "Skipping initial check: no persisted bitfield, assuming all pieces valid"
+                    );
+                    let total_pieces = self.metadata.info.lengths().total_pieces() as usize;
+                    let byte_count = (total_pieces + 7) / 8;
+                    let mut bytes = vec![0xFFu8; byte_count];
+                    // Clear trailing bits beyond total_pieces
+                    let trailing = byte_count * 8 - total_pieces;
+                    if trailing > 0 {
+                        bytes[byte_count - 1] &= !((1u8 << trailing) - 1);
+                    }
+                    let bf = BF::from_boxed_slice(bytes.into_boxed_slice());
+                    bitv_factory
+                        .store_initial_check(id, bf)
+                        .await
+                        .context("error storing initial check bitfield")?
+                }
             }
-            let bf = BF::from_boxed_slice(bytes.into_boxed_slice());
-            bitv_factory
-                .store_initial_check(id, bf)
-                .await
-                .context("error storing initial check bitfield")?
         } else {
             match have_pieces {
                 Some(h) => h,
